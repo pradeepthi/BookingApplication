@@ -10,9 +10,10 @@ import com.bookingapp.util.ErrorCode;
 public class GenericExceptionHandler {
 
     @ExceptionHandler
-    public ResponseEntity<ErrorCode> handleException(BookingApplicationException e){
+    public ResponseEntity<?> handleException(BookingApplicationException e){
 
-        return new ResponseEntity<>(e.getErrorCode(), e.getErrorCode().getHttpStatus());
+        ErrorCode errorCode = e.getErrorCode();
+        return ResponseEntity.status(e.getErrorCode().getHttpStatus()).body(e.getErrorCode());
 
     }
 

@@ -5,6 +5,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.experimental.SuperBuilder;
 
+import java.time.LocalDate;
 import java.util.Date;
 
 @Data
@@ -18,8 +19,8 @@ public abstract class BaseEntity {
     private Long id;
 
     @Column
-    private Date createdAt;
+    private LocalDate createdAt;
 
     @Column
-    private Date lastUpdatedAt;
+    private LocalDate lastUpdatedAt;
 }

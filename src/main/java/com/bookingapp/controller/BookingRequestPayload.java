@@ -1,9 +1,11 @@
 package com.bookingapp.controller;
 
+import com.bookingapp.domain.BookingType;
 import jakarta.validation.constraints.NotNull;
 import lombok.Builder;
 import lombok.Data;
 
+import java.time.LocalDate;
 import java.util.Date;
 
 @Data
@@ -17,8 +19,11 @@ public class BookingRequestPayload {
     private Long userId;
 
     @NotNull
-    private Date startDate;
+    private BookingType bookingType;
 
     @NotNull
-    private Date endDate;
+    private LocalDate startDate;
+
+    @NotNull
+    private LocalDate endDate;
 }

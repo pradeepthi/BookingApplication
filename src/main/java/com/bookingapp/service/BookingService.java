@@ -1,5 +1,6 @@
 package com.bookingapp.service;
 
+import com.bookingapp.controller.BookingRequestPayload;
 import com.bookingapp.controller.BookingUpdateRequest;
 import com.bookingapp.domain.*;
 import com.bookingapp.exception.BookingApplicationException;
@@ -13,7 +14,9 @@ import com.bookingapp.repository.entity.BookingEntity;
 import com.bookingapp.util.ErrorCode;
 import com.bookingapp.util.IEntityMapper;
 
+import java.time.LocalDate;
 import java.util.Date;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.locks.Lock;
 
@@ -35,6 +38,12 @@ public class BookingService {
     @Autowired
     private UserService userService;
 
+    /**
+     * This method either blocks or reserves a property.
+     * @param booking
+     * @return
+     */
+
     @Transactional
     public Booking createBooking(Booking booking){
 
@@ -45,8 +54,7 @@ public class BookingService {
         try {
             if(lock.tryLock()) {
                 //double validation
-                isValidBookingUser(booking.getUser().getId());
-                isValidBookingProperty(booking.getProperty().getId());
+                isPropertyAvailable(booking);
                 BookingEntity newBooking = bookingEntityMapper.mapToEntity(booking);
                 result = bookingEntityMapper.mapToDomain(bookingRepository.save(newBooking));
             }
@@ -59,35 +67,85 @@ public class BookingService {
 
     }
 
-    public void isValidBookingProperty(Long propertyId) {
+    public void isValidBooking(Booking booking) {
 
-        Property existingProperty = propertyService.findById(propertyId);
+        //check if valid property id
+        Property existingProperty = propertyService.findById(booking.getProperty().getId());
         if(null == existingProperty){
             throw new BookingApplicationException(ErrorCode.INVALID_PROPERTY_ID);
         }
 
-        if(existingProperty.getStatus() != PropertyStatus.OPEN) {
-            throw new BookingApplicationException(ErrorCode.PROPERTY_UNAVAILABLE);
-        }
+        //validate date range
+        isValidDateRange(booking.getStartDate(), booking.getEndDate());
+
     }
 
-    public void isValidBookingUser(Long userId) {
+    public void isValidDateRange(LocalDate startDate, LocalDate endDate) {
+
+        if(startDate.isBefore(LocalDate.now())
+                ||endDate.isBefore(startDate)) {
+            throw new BookingApplicationException(ErrorCode.INVALID_DATE_RANGE);
+
+        }
+
+    }
+    public void isPropertyAvailable(Booking booking) {
+
+        //Depending on the booking type, check the status of the booking.
+        BookingType bookingType = booking.getBookingType();
+        switch (bookingType) {
+            case RESERVE -> {
+                //check if the property has any advanced bookings(reservations/blocks) overlapping with the booking dates.
+                List<BookingEntity> overlappingBookings = bookingRepository.findByOverlappingBookings(booking.getProperty().getId(),
+                        booking.getStartDate(), booking.getEndDate());
+                if(!overlappingBookings.isEmpty()) {
+                    throw new BookingApplicationException(ErrorCode.PROPERTY_UNAVAILABLE);
+                }
+
+                break;
+            }
+            case BLOCK -> {
+                //check if the property is booked during this date range.
+                List<BookingEntity> existingReservations = bookingRepository.findReservationsOverlappedInDateRange(booking.getProperty().getId(),
+                        booking.getStartDate(), booking.getEndDate());
+
+                if(!existingReservations.isEmpty()) {
+                    throw new BookingApplicationException((ErrorCode.PROPERTY_UNAVAILABLE));
+                }
+
+                break;
+            }
+            default -> {
+                throw new BookingApplicationException(ErrorCode.INVALID_BOOKING_TYPE);
+            }
+        }
+
+
+    }
+
+    public void isValidBookingUser(Long userId, BookingType bookingType) {
 
         User user = userService.findById(userId);
-        if(null == user || (user.getStatus() != UserStatus.ACTIVE) || (user.getRole() != UserRole.GUEST)) {
+        if(null == user || (user.getStatus() != UserStatus.ACTIVE)) {
             throw new BookingApplicationException(ErrorCode.INVALID_USER_ID);
         }
 
-    }
-
-    public boolean isPropertyBooked(Long propertyId) {
-
-        Optional<BookingEntity> bookedEntity = bookingRepository.findByPropertyIdAndStatus(propertyId, BookingStatus.RESERVED);
-        if(bookedEntity.isPresent()) {
-            return true;
+        switch (bookingType) {
+            case RESERVE -> {
+                if(user.getRole() != UserRole.GUEST){
+                    throw new BookingApplicationException(ErrorCode.NOT_ACCEPTABLE);
+                }
+            }
+            case BLOCK -> {
+                if(user.getRole() == UserRole.GUEST ){
+                    throw new BookingApplicationException(ErrorCode.NOT_ACCEPTABLE);
+                }
+            }
+            default -> {
+                throw new BookingApplicationException(ErrorCode.INVALID_BOOKING_TYPE);
+            }
         }
 
-        return false;
     }
 
     public Booking findById(Long bookingId) {
@@ -100,36 +158,43 @@ public class BookingService {
     }
 
     /**
-     * Update startDate, endDate and status of a booking. The user that created the booking can only update the booking details
+     * This method can update only dates of a booking. Status of the booking is controlled by
+     * the actions like create booking, delete booking and not done by update API
      * @param bookingId
      * @param updateRequest
      * @return
      */
+    @Transactional
     public Booking updateBooking(Long bookingId, BookingUpdateRequest updateRequest) {
 
-        Lock lock = lockRegistry.obtain("booking_"+bookingId);
+        //validate booking id with the user.
+        Booking existingBooking = findById(bookingId);
+        if(existingBooking == null) {
+            throw new BookingApplicationException(ErrorCode.INVALID_REQUEST);
+        }
+
+        //To avoid concurrent property date updates for the given date range
+        Lock lock = lockRegistry.obtain("property_"+existingBooking.getProperty().getId());
         try {
 
             if(lock.tryLock()) {
-                //get booking details from database
-                BookingEntity existingBooking = bookingRepository.findById(bookingId)
-                        .orElseThrow(() -> new BookingApplicationException(ErrorCode.INVALID_REQUEST));
 
-                //update it with the requested data
-                if(null != updateRequest.getStartDate()) {
-                    existingBooking.setStartDate(updateRequest.getStartDate());
+                //check if the property has any advanced bookings(reservations/blocks) overlapping with the booking dates by other users.
+                List<BookingEntity> overlappingBookings = bookingRepository.findByOverlappingBookingsByOtherUsers(existingBooking.getProperty().getId(),
+                        updateRequest.getStartDate(), updateRequest.getEndDate(), updateRequest.getUserId());
+
+                if(!overlappingBookings.isEmpty()) {
+                    throw new BookingApplicationException(ErrorCode.PROPERTY_UNAVAILABLE);
                 }
 
-                if(null != updateRequest.getEndDate()) {
-                    existingBooking.setEndDate(updateRequest.getEndDate());
-                }
+                //create new booking object which will be used to create new booking
+                Booking newBooking = existingBooking;
+                newBooking.setStartDate(updateRequest.getStartDate());
+                newBooking.setEndDate(updateRequest.getEndDate());
+                newBooking.setLastUpdatedAt(LocalDate.now());
 
-                if(null != updateRequest.getStatus()) {
-                    existingBooking.setStatus(updateRequest.getStatus());
-                }
-
-                existingBooking.setLastUpdatedAt(new Date(System.currentTimeMillis()));
-                return bookingEntityMapper.mapToDomain(bookingRepository.save(existingBooking));
+                //update database.
+                return bookingEntityMapper.mapToDomain(bookingRepository.save(bookingEntityMapper.mapToEntity(existingBooking)));
             }
 
         } finally {
@@ -141,31 +206,49 @@ public class BookingService {
     }
 
     /**
-     * This method deletes booking by id
+     * This method deletes booking by updating the status to cancelled
      * @param bookingId
      * @return
      */
     public Booking deleteById(Long bookingId) {
 
+        return updateBookingStatus(bookingId, BookingStatus.CANCELLED);
+
+    }
+
+    /**
+     * This method can be used to update any details of booking like status.
+     * @param bookingId
+     * @param bookingStatus
+     * @return
+     */
+    private Booking updateBookingStatus(Long bookingId, BookingStatus bookingStatus) {
+
+        Booking updatedBookingDetails = null;
+
+        //get booking details
+        Booking existingBooking = findById(bookingId);
+        if(existingBooking == null) {
+            throw new BookingApplicationException(ErrorCode.INVALID_REQUEST);
+        }
+
+        //status is always updated for the given bookingId and hence lock is applied on booking Id
         Lock lock = lockRegistry.obtain("booking_"+bookingId);
         try {
-
             if(lock.tryLock()) {
-                //get booking details from database
-                BookingEntity existingBooking = bookingRepository.findById(bookingId)
-                        .orElseThrow(() -> new BookingApplicationException(ErrorCode.INVALID_REQUEST));
 
-                bookingRepository.deleteById(bookingId);
+                existingBooking.setStatus(bookingStatus);
+                existingBooking.setLastUpdatedAt(LocalDate.now());
 
-                return bookingEntityMapper.mapToDomain(existingBooking);
+                //save entity to the database and return updated booking details
+                updatedBookingDetails = bookingEntityMapper.mapToDomain(bookingRepository.save(bookingEntityMapper.mapToEntity(existingBooking)));
             }
 
         } finally {
             lock.unlock();
         }
 
-        return null;
-
+        return updatedBookingDetails;
     }
 
 }

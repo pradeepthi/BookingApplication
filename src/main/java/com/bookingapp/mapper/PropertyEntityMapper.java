@@ -20,7 +20,6 @@ public class PropertyEntityMapper implements IEntityMapper<Property, PropertyEnt
                 .id(property.getId())
                 .name(property.getName())
                 .pricePerDay(property.getPricePerDay())
-                .status(property.getStatus())
                 .createdAt(property.getCreatedAt())
                 .lastUpdatedAt(property.getLastUpdatedAt())
                 .build();
@@ -32,7 +31,6 @@ public class PropertyEntityMapper implements IEntityMapper<Property, PropertyEnt
                 .id(propertyEntity.getId())
                 .name(propertyEntity.getName())
                 .pricePerDay(propertyEntity.getPricePerDay())
-                .status(propertyEntity.getStatus())
                 .createdAt(propertyEntity.getCreatedAt())
                 .lastUpdatedAt(propertyEntity.getLastUpdatedAt())
                 .build();

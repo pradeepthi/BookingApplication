@@ -3,6 +3,7 @@ package com.bookingapp.domain;
 import lombok.Builder;
 import lombok.Data;
 
+import java.time.LocalDate;
 import java.util.Date;
 
 @Data
@@ -13,7 +14,7 @@ public class User {
     private String name;
     private String email;
     private UserStatus status;
-    private Date createdAt;
-    private Date lastUpdatedAt;
+    private LocalDate createdAt;
+    private LocalDate lastUpdatedAt;
     private UserRole role;
 }

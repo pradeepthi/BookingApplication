@@ -7,7 +7,6 @@ import com.bookingapp.domain.User;
 import com.bookingapp.exception.BookingApplicationException;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
-import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -17,7 +16,7 @@ import com.bookingapp.service.PropertyService;
 import com.bookingapp.service.UserService;
 import com.bookingapp.util.ErrorCode;
 
-import java.util.Date;
+import java.time.LocalDate;
 
 @RestController
 @RequestMapping("/api/v1/bookings")
@@ -33,18 +32,18 @@ public class BookingController {
     private PropertyService propertyService;
 
     /**
-     * Create a booking
+     * Create a booking of type reservation or block
      * @param bookingRequestPayload
      * @return
      */
     @PostMapping
     public ResponseEntity<?> bookProperty(@RequestBody @NotNull @Valid BookingRequestPayload bookingRequestPayload){
 
-        //validate booking request payload
-        isValidBookingRequestPayload(bookingRequestPayload);
-
         //map request payload to domain
         Booking booking = buildBooking(bookingRequestPayload);
+
+        //validate booking request payload
+        isValidBookingRequestPayload(booking);
 
         Booking createdBooking = bookingService.createBooking(booking);
 
@@ -62,19 +61,23 @@ public class BookingController {
                 .user(User.builder()
                         .id(bookingRequestPayload.getUserId())
                         .build())
-                .createdAt(new Date(System.currentTimeMillis()))
-                .lastUpdatedAt(new Date(System.currentTimeMillis()))
-                .status(BookingStatus.RESERVED)
+                .bookingType(bookingRequestPayload.getBookingType())
+                .status(BookingStatus.ACTIVE)
+                .createdAt(LocalDate.now())
+                .lastUpdatedAt(LocalDate.now())
                 .build();
     }
 
-    private void isValidBookingRequestPayload(BookingRequestPayload bookingRequestPayload){
+    private void isValidBookingRequestPayload(Booking booking){
+
+        //validate booking object
+        bookingService.isValidBooking(booking);
 
         //validate userId and status
-        bookingService.isValidBookingUser(bookingRequestPayload.getUserId());
+        bookingService.isValidBookingUser(booking.getUser().getId(), booking.getBookingType());
 
-        //validate propertyId
-        bookingService.isValidBookingProperty(bookingRequestPayload.getPropertyId());
+        //check if property is available to book
+        bookingService.isPropertyAvailable(booking);
 
     }
 
@@ -87,6 +90,8 @@ public class BookingController {
     public ResponseEntity<?> updateBooking(@PathVariable Long id, @RequestBody @Valid @NotNull BookingUpdateRequest updateRequest) {
 
         isValidBookingUpdateRequest(id, updateRequest);
+
+        //update dates - cancel existing booking or block and create new booking/block with new date range.
         Booking updatedBooking = bookingService.updateBooking(id, updateRequest);
 
         return ResponseEntity.ok(updatedBooking);
@@ -94,19 +99,24 @@ public class BookingController {
 
     private void isValidBookingUpdateRequest(Long bookingId, BookingUpdateRequest updateRequest) {
 
-        //validate userId and status
-        bookingService.isValidBookingUser(updateRequest.getUserId());
-
         //check if property exists and if booking is done by the user
         Booking existingBooking = bookingService.findById(bookingId);
         if(existingBooking.getUser().getId() != updateRequest.getUserId()) {
             throw new BookingApplicationException(ErrorCode.INVALID_REQUEST);
         }
 
+        //validate userId and status
+        bookingService.isValidBookingUser(updateRequest.getUserId(), existingBooking.getBookingType());
+
         //validate startDate and end Date
         if((updateRequest.getStartDate() != null) && (updateRequest.getEndDate() != null)
                 && (updateRequest.getStartDate().compareTo(updateRequest.getEndDate()) > 0)) {
-            throw new BookingApplicationException(ErrorCode.INVALID_REQUEST);
+            throw new BookingApplicationException(ErrorCode.INVALID_DATE_RANGE);
+        }
+
+        //validate startDate
+        if(updateRequest.getStartDate() != null && updateRequest.getStartDate().isBefore(LocalDate.now())) {
+            throw new BookingApplicationException(ErrorCode.INVALID_DATE_RANGE);
         }
 
     }
@@ -134,6 +144,7 @@ public class BookingController {
      */
     @DeleteMapping("/{id}")
     public ResponseEntity<?> deleteBookingById(@PathVariable Long id) {
+        //update booking/block status as cancelled
         Booking existingBooking = bookingService.deleteById(id);
         return ResponseEntity.ok(existingBooking);
     }

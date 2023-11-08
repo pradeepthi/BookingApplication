@@ -3,6 +3,7 @@ package com.bookingapp.domain;
 import lombok.Builder;
 import lombok.Data;
 
+import java.time.LocalDate;
 import java.util.Date;
 
 @Data
@@ -12,9 +13,8 @@ public class Property {
     private Long id;
     private String name;
     private Double pricePerDay;
-    private PropertyStatus status;
-    private Date createdAt;
-    private Date lastUpdatedAt;
+    private LocalDate createdAt;
+    private LocalDate lastUpdatedAt;
     private User propertyOwner;
 
 }
