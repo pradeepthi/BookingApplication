@@ -131,6 +131,7 @@ public class BookingController {
 
         Booking existingBooking = bookingService.findById(id);
         if(existingBooking == null) {
+            System.out.println("Booking not found"+id);
             return ResponseEntity.notFound().build();
         } else {
             return ResponseEntity.ok(existingBooking);
